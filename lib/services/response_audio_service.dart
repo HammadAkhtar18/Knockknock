@@ -2,10 +2,44 @@ import 'dart:math';
 
 import 'package:just_audio/just_audio.dart';
 
-class ResponseAudioService {
-  ResponseAudioService({Random? random}) : _random = random ?? Random();
+abstract class AudioPlayerClient {
+  Future<void> setLoopMode(LoopMode mode);
+  Future<void> stop();
+  Future<void> setAsset(String assetPath);
+  Future<void> play();
+  Future<void> dispose();
+}
 
-  final AudioPlayer _audioPlayer = AudioPlayer();
+class JustAudioPlayerClient implements AudioPlayerClient {
+  JustAudioPlayerClient({AudioPlayer? audioPlayer})
+      : _audioPlayer = audioPlayer ?? AudioPlayer();
+
+  final AudioPlayer _audioPlayer;
+
+  @override
+  Future<void> setLoopMode(LoopMode mode) => _audioPlayer.setLoopMode(mode);
+
+  @override
+  Future<void> stop() => _audioPlayer.stop();
+
+  @override
+  Future<void> setAsset(String assetPath) => _audioPlayer.setAsset(assetPath);
+
+  @override
+  Future<void> play() => _audioPlayer.play();
+
+  @override
+  Future<void> dispose() => _audioPlayer.dispose();
+}
+
+class ResponseAudioService {
+  ResponseAudioService({
+    Random? random,
+    AudioPlayerClient? audioPlayerClient,
+  })  : _random = random ?? Random(),
+        _audioPlayer = audioPlayerClient ?? JustAudioPlayerClient();
+
+  final AudioPlayerClient _audioPlayer;
   final Random _random;
 
   final List<_KnockResponse> _singleKnockResponses = const [
@@ -77,7 +111,9 @@ class ResponseAudioService {
 
   Future<void> _playResponse(_KnockResponse response) async {
     if (!_isInitialized) {
-      await init();
+      throw StateError(
+        'ResponseAudioService.init() must be called before playing audio.',
+      );
     }
 
     try {

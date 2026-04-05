@@ -2,20 +2,79 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
+typedef AccelerometerStreamFactory = Stream<AccelerometerEvent> Function();
+typedef NowProvider = DateTime Function();
+
+abstract class RecorderClient {
+  Future<bool> hasPermission();
+  Future<bool> isRecording();
+  Future<void> stop();
+  Future<void> start(RecordConfig config, {required String path});
+  Stream<Amplitude> onAmplitudeChanged(Duration interval);
+  Future<void> dispose();
+}
+
+class RecordPackageRecorderClient implements RecorderClient {
+  RecordPackageRecorderClient({AudioRecorder? recorder})
+      : _recorder = recorder ?? AudioRecorder();
+
+  final AudioRecorder _recorder;
+
+  @override
+  Future<bool> hasPermission() => _recorder.hasPermission();
+
+  @override
+  Future<bool> isRecording() => _recorder.isRecording();
+
+  @override
+  Future<void> stop() => _recorder.stop();
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) =>
+      _recorder.start(config, path: path);
+
+  @override
+  Stream<Amplitude> onAmplitudeChanged(Duration interval) =>
+      _recorder.onAmplitudeChanged(interval);
+
+  @override
+  Future<void> dispose() => _recorder.dispose();
+}
+
 class KnockDetectorService {
-  static const double _mobileKnockThreshold = 18.0;
-  static const double _desktopKnockThresholdDb = -25.0;
-  static const Duration _cooldownDuration = Duration(milliseconds: 600);
-  static const Duration _doubleKnockWindow = Duration(milliseconds: 400);
-  static const Duration _desktopSampleInterval = Duration(milliseconds: 100);
+  KnockDetectorService({
+    RecorderClient? recorderClient,
+    AccelerometerStreamFactory? accelerometerStreamFactory,
+    NowProvider? nowProvider,
+    bool Function()? isMobilePlatform,
+    bool Function()? isDesktopPlatform,
+  })  : _audioRecorder = recorderClient ?? RecordPackageRecorderClient(),
+        _accelerometerStreamFactory =
+            accelerometerStreamFactory ?? accelerometerEventStream,
+        _nowProvider = nowProvider ?? DateTime.now,
+        _isMobilePlatform =
+            isMobilePlatform ?? (() => Platform.isAndroid || Platform.isIOS),
+        _isDesktopPlatform =
+            isDesktopPlatform ?? (() => Platform.isWindows || Platform.isMacOS);
+
+  static const double mobileKnockThreshold = 18.0;
+  static const double desktopKnockThresholdDb = -25.0;
+  static const Duration cooldownDuration = Duration(milliseconds: 600);
+  static const Duration doubleKnockWindow = Duration(milliseconds: 400);
+  static const Duration desktopSampleInterval = Duration(milliseconds: 100);
 
   void Function()? onKnock;
   void Function()? onDoubleKnock;
 
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  final RecorderClient _audioRecorder;
+  final AccelerometerStreamFactory _accelerometerStreamFactory;
+  final NowProvider _nowProvider;
+  final bool Function() _isMobilePlatform;
+  final bool Function() _isDesktopPlatform;
 
   StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
   StreamSubscription<Amplitude>? _amplitudeSubscription;
@@ -31,12 +90,12 @@ class KnockDetectorService {
 
     _isRunning = true;
 
-    if (Platform.isAndroid || Platform.isIOS) {
+    if (_isMobilePlatform()) {
       _startMobileDetection();
       return;
     }
 
-    if (Platform.isWindows || Platform.isMacOS) {
+    if (_isDesktopPlatform()) {
       await _startDesktopDetection();
       return;
     }
@@ -62,20 +121,30 @@ class KnockDetectorService {
 
   void dispose() {
     stop();
-    _audioRecorder.dispose();
+    unawaited(_audioRecorder.dispose());
+  }
+
+  @visibleForTesting
+  void processMobileMagnitude(double magnitude) {
+    if (magnitude > mobileKnockThreshold) {
+      _handleKnock();
+    }
+  }
+
+  @visibleForTesting
+  void processDesktopAmplitude(double currentDb) {
+    if (currentDb > desktopKnockThresholdDb) {
+      _handleKnock();
+    }
   }
 
   void _startMobileDetection() {
     _accelerometerSubscription?.cancel();
 
-    _accelerometerSubscription =
-        accelerometerEventStream().listen((AccelerometerEvent event) {
+    _accelerometerSubscription = _accelerometerStreamFactory().listen((event) {
       final double magnitude =
           sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
-
-      if (magnitude > _mobileKnockThreshold) {
-        _handleKnock();
-      }
+      processMobileMagnitude(magnitude);
     });
   }
 
@@ -94,7 +163,7 @@ class KnockDetectorService {
     }
 
     final String path =
-        '${Directory.systemTemp.path}/knockknock_${DateTime.now().microsecondsSinceEpoch}.wav';
+        '${Directory.systemTemp.path}/knockknock_${_nowProvider().microsecondsSinceEpoch}.wav';
 
     await _audioRecorder.start(
       const RecordConfig(encoder: AudioEncoder.wav),
@@ -102,33 +171,32 @@ class KnockDetectorService {
     );
 
     _amplitudeSubscription = _audioRecorder
-        .onAmplitudeChanged(_desktopSampleInterval)
-        .listen((Amplitude amplitude) {
-      if (amplitude.current > _desktopKnockThresholdDb) {
-        _handleKnock();
-      }
+        .onAmplitudeChanged(desktopSampleInterval)
+        .listen((amplitude) {
+      processDesktopAmplitude(amplitude.current);
     });
   }
 
   void _handleKnock() {
-    final DateTime now = DateTime.now();
-
-    final DateTime? lastKnockTriggeredAt = _lastKnockTriggeredAt;
-    if (lastKnockTriggeredAt != null &&
-        now.difference(lastKnockTriggeredAt) < _cooldownDuration) {
-      return;
-    }
-
+    final DateTime now = _nowProvider();
     final DateTime? previousKnockAt = _lastKnockAt;
     _lastKnockAt = now;
 
+    if (previousKnockAt != null &&
+        now.difference(previousKnockAt) <= doubleKnockWindow) {
+      _lastKnockTriggeredAt = now;
+      onDoubleKnock?.call();
+      return;
+    }
+
+    final DateTime? lastKnockTriggeredAt = _lastKnockTriggeredAt;
+    if (lastKnockTriggeredAt != null &&
+        now.difference(lastKnockTriggeredAt) < cooldownDuration) {
+      return;
+    }
+
     _lastKnockTriggeredAt = now;
     onKnock?.call();
-
-    if (previousKnockAt != null &&
-        now.difference(previousKnockAt) <= _doubleKnockWindow) {
-      onDoubleKnock?.call();
-    }
   }
 
   Future<void> _stopDesktopRecorder() async {
