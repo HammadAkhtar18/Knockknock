@@ -64,12 +64,15 @@ class _KnockHomePageState extends State<KnockHomePage> {
           children: <Widget>[
             Align(
               alignment: Alignment.topRight,
-              child: IconButton(
-                icon: const Icon(Icons.settings),
-                color: Colors.white,
-                onPressed: () {
-                  // Placeholder for settings navigation.
-                },
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: IconButton(
+                  onPressed: () {
+                    // Placeholder for settings action.
+                  },
+                  icon: const Icon(Icons.settings),
+                  color: Colors.white,
+                ),
               ),
             ),
             Expanded(
