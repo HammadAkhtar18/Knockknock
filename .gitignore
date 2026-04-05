@@ -1,0 +1,13 @@
+*.mp3
+*.wav
+*.png
+*.ico
+*.jpg
+*.jpeg
+*.gif
+*.zip
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.pyc
