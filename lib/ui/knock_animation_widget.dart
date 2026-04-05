@@ -25,6 +25,9 @@ class KnockAnimationWidgetState extends State<KnockAnimationWidget>
   bool _isFlashing = false;
   String _bubbleText = '';
 
+  @visibleForTesting
+  String get currentBubbleText => _bubbleText;
+
   @override
   void initState() {
     super.initState();
