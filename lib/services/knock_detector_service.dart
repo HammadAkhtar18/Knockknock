@@ -61,8 +61,8 @@ class KnockDetectorService {
         _isDesktopPlatform =
             isDesktopPlatform ?? (() => Platform.isWindows || Platform.isMacOS);
 
-  static const double mobileKnockThreshold = 18.0;
-  static const double desktopKnockThresholdDb = -25.0;
+  static const double defaultMobileKnockThreshold = 18.0;
+  static const double defaultDesktopKnockThresholdDb = -25.0;
   static const Duration cooldownDuration = Duration(milliseconds: 600);
   static const Duration doubleKnockWindow = Duration(milliseconds: 400);
   static const Duration desktopSampleInterval = Duration(milliseconds: 100);
@@ -82,6 +82,24 @@ class KnockDetectorService {
   DateTime? _lastKnockAt;
   DateTime? _lastKnockTriggeredAt;
   bool _isRunning = false;
+  bool _doubleKnockEnabled = true;
+  double _mobileKnockThreshold = defaultMobileKnockThreshold;
+  double _desktopKnockThresholdDb = defaultDesktopKnockThresholdDb;
+
+  void updateSensitivityThreshold(double threshold) {
+    if (_isMobilePlatform()) {
+      _mobileKnockThreshold = threshold;
+      return;
+    }
+
+    if (_isDesktopPlatform()) {
+      _desktopKnockThresholdDb = threshold;
+    }
+  }
+
+  void setDoubleKnockEnabled(bool enabled) {
+    _doubleKnockEnabled = enabled;
+  }
 
   Future<void> start() async {
     if (_isRunning) {
@@ -126,14 +144,14 @@ class KnockDetectorService {
 
   @visibleForTesting
   void processMobileMagnitude(double magnitude) {
-    if (magnitude > mobileKnockThreshold) {
+    if (magnitude > _mobileKnockThreshold) {
       _handleKnock();
     }
   }
 
   @visibleForTesting
   void processDesktopAmplitude(double currentDb) {
-    if (currentDb > desktopKnockThresholdDb) {
+    if (currentDb > _desktopKnockThresholdDb) {
       _handleKnock();
     }
   }
@@ -182,7 +200,8 @@ class KnockDetectorService {
     final DateTime? previousKnockAt = _lastKnockAt;
     _lastKnockAt = now;
 
-    if (previousKnockAt != null &&
+    if (_doubleKnockEnabled &&
+        previousKnockAt != null &&
         now.difference(previousKnockAt) <= doubleKnockWindow) {
       _lastKnockTriggeredAt = now;
       onDoubleKnock?.call();
