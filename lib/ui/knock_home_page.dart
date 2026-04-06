@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../services/knock_detector_service.dart';
 import '../services/response_audio_service.dart';
 import 'knock_animation_widget.dart';
+import 'settings_screen.dart';
 
 class KnockHomePage extends StatefulWidget {
   const KnockHomePage({super.key});
@@ -18,6 +19,9 @@ class _KnockHomePageState extends State<KnockHomePage> {
   final ResponseAudioService _audioService = ResponseAudioService();
   final GlobalKey<KnockAnimationWidgetState> _animationKey =
       GlobalKey<KnockAnimationWidgetState>();
+
+  double _currentVolume = 1.0;
+  bool _doubleKnockEnabled = true;
 
   @override
   void initState() {
@@ -48,6 +52,27 @@ class _KnockHomePageState extends State<KnockHomePage> {
     _animationKey.currentState?.triggerDoubleKnock();
   }
 
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(
+          initialVolume: _currentVolume,
+          initialDoubleKnock: _doubleKnockEnabled,
+          onSettingsChanged: _onSettingsChanged,
+        ),
+      ),
+    );
+  }
+
+  void _onSettingsChanged(double threshold, double volume, bool doubleKnock) {
+    _detector.updateSensitivityThreshold(threshold);
+    _detector.setDoubleKnockEnabled(doubleKnock);
+    unawaited(_audioService.setVolume(volume));
+
+    _currentVolume = volume;
+    _doubleKnockEnabled = doubleKnock;
+  }
+
   @override
   void dispose() {
     _detector.dispose();
@@ -67,9 +92,7 @@ class _KnockHomePageState extends State<KnockHomePage> {
               child: Padding(
                 padding: const EdgeInsets.only(right: 8),
                 child: IconButton(
-                  onPressed: () {
-                    // Placeholder for settings action.
-                  },
+                  onPressed: _openSettings,
                   icon: const Icon(Icons.settings),
                   color: Colors.white,
                 ),

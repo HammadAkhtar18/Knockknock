@@ -4,6 +4,7 @@ import 'package:just_audio/just_audio.dart';
 
 abstract class AudioPlayerClient {
   Future<void> setLoopMode(LoopMode mode);
+  Future<void> setVolume(double volume);
   Future<void> stop();
   Future<void> setAsset(String assetPath);
   Future<void> play();
@@ -18,6 +19,9 @@ class JustAudioPlayerClient implements AudioPlayerClient {
 
   @override
   Future<void> setLoopMode(LoopMode mode) => _audioPlayer.setLoopMode(mode);
+
+  @override
+  Future<void> setVolume(double volume) => _audioPlayer.setVolume(volume);
 
   @override
   Future<void> stop() => _audioPlayer.stop();
@@ -77,6 +81,11 @@ class ResponseAudioService {
       _isInitialized = false;
       rethrow;
     }
+  }
+
+  Future<void> setVolume(double volume) async {
+    final double safeVolume = volume.clamp(0.0, 1.0);
+    await _audioPlayer.setVolume(safeVolume);
   }
 
   Future<String> playKnockResponse() async {
